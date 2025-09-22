@@ -7,6 +7,8 @@ library(mlbench)
 library(corrplot)
 library(caret)
 library(e1071)
+library(dplyr)
+library(VIM)
 
 ################################################################################
 # Data import
@@ -103,6 +105,63 @@ length(table(data_no_bin$field, useNA = "ifany"))
 #table(data_no_bin$field, useNA = "ifany")
 
 ################################################################################
-# 
+# KNN Imputation
 ################################################################################
+data_imputed <- kNN(data_no_bin, k = 5, imp_var = FALSE)
+dim(data_imputed)
+
+################################################################################
+# Separating continuous and categorical data
+################################################################################
+cont_data = data_imputed[, sapply(data_imputed, is.numeric)]
+cat_data = data_imputed[, sapply(data_imputed, function(x) is.factor(x) | is.character(x))]
+names(cont_data)
+names(cat_data)
+
+
+################################################################################
+# Creating dummy variables for Categorical data
+################################################################################
+dummies <- dummyVars(~ ., data = cat_data, fullRank=TRUE)
+
+# Apply transformation
+cat_dummies <- data.frame(predict(dummies, newdata = cat_data))
+dim(cat_dummies)
+names(cat_dummies)
+
+################################################################################
+# Applying correlations on Continuous Data
+################################################################################
+
+correlations <- cor(cont_data)
+dim(correlations)
+correlations[1:4, 1:4]
+corrplot(correlations, order = "hclust")
+findCorrelation(correlations, cutoff = 0.85)
+colnames(cont_data)[c(40)]
+
+################################################################################
+# Applying NZV on Categorical Data
+################################################################################
+
+nearZeroVar(cat_dummies)
+colnames(cat_dummies)[c(12,16)]
+cat_dummies$fieldOther
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

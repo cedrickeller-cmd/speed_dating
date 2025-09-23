@@ -1,4 +1,4 @@
-# speed_dating
+# Speed Dating
 Predictive Modeling of Speed Dating Outcomes
 
 ## About the data

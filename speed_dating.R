@@ -108,7 +108,9 @@ length(table(data_no_bin$field, useNA = "ifany"))
 # Proportion of missing data in each column
 ################################################################################
 ##############################
-# Proportion of observations with at least one missing value
+# Missing values -- overall and by obs
+sum(is.na(data_no_bin))
+mean(is.na(data_no_bin))
 num_missing_obs = sum(!complete.cases(data_no_bin))
 num_missing_obs
 prop_missing_obs = num_missing_obs / nrow(data_no_bin)
@@ -127,7 +129,9 @@ data_no_bin = data_no_bin[, missing_proportions <= 0.75]
 dim(data_no_bin)
 
 ##############################
-# Proportion of observations with at least one missing value (after drop)
+# Missing values -- overall and by obs (after drop)
+sum(is.na(data_no_bin))
+mean(is.na(data_no_bin))
 num_missing_obs = sum(!complete.cases(data_no_bin))
 num_missing_obs
 prop_missing_obs = num_missing_obs / nrow(data_no_bin)
@@ -165,7 +169,7 @@ names(cat_dummies)
 correlations_cont = cor(cont_data)
 dim(correlations_cont)
 #correlations_cont[1:4, 1:4]
-corrplot(correlations_cont, order = "hclust")
+?corrplot(correlations_cont, order = "hclust", title = "Correlation Matrix of Continuous Predictors", mar = c(0, 0, 2, 0))
 findCorrelation(correlations_cont, cutoff = 0.85)
 #colnames(cont_data)[c(40)] # "museums"
 
@@ -223,17 +227,16 @@ par(mfrow = c(1, 1))
 ##############################
 # Get all BoxCox lambda values for predictors
 lambdas = sapply(cont_data, function(x) { 
-  BoxCoxTrans(x + 0.000001)$lambda # requires "caret" package; tiny value must be added to only have positive numbers (for the Box Cox Transformation to converge)
+  BoxCoxTrans(x + 1)$lambda # requires "caret" package; value must be added to only have positive numbers (for the Box Cox Transformation to converge)
 })
 #lambdas
 
 skew_values = apply(cont_data, 2, skewness)
 #skewValues
 
-# Drop approximately symmetrical (=1 and >1)
+# Only retain highly skewed predictors
 cont_skewed = names(skew_values[abs(skew_values) > 1])
-# Drop NA
-cont_skewed = lambdas[names(lambdas) != "Na"]
+#cont_skewed
 
 ##############################
 # Box-Cox transformed continuous list (initialization)
@@ -292,7 +295,7 @@ par(mfrow = c(1, 1))
 # Merging continuous and categorical data
 ################################################################################
 # Merge continuous + categorical (dummy vars after nzv)
-dim(cont_data_ss) # 8378 rows
+dim(cont_data_bc) # 8378 rows
 dim(cat_dummies) # 8378 rows
 combined_data = cbind(cont_data_bc, cat_dummies)
 dim(combined_data)
@@ -330,8 +333,8 @@ for (c in cutoffs) {
   # Vertical line at k
   abline(v = k, col = "darkblue", lty = 2)
   # Text label
-  text(x = k+2.65, y = percentVariance[k]+.6, labels = paste0(c, " %"), col = "darkred", cex = 0.8)
-  text(x = k+3.5, y = percentVariance[k]+.25, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
+  text(x = k+3.5, y = percentVariance[k]+.6, labels = paste0(c, " %"), col = "darkred", cex = 0.8)
+  text(x = k+4.5, y = percentVariance[k]+.25, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
 }
 
 ##############################
@@ -358,7 +361,7 @@ for (c in cutoffs) {
 # The reduction of predictors with high enough variance explained is limited
 # Before PCA: 76, After PCA: 95%->61 PCs, 90%->52PCs
 
-c = 90 # cutoff percentage
+c = 95 # cutoff percentage
 k = which(cumpercentVariance >= c)[1] # first k PC exceeding the cum pct var explained
 
 data_pca = as.data.frame(pcaObject$x[, 1:k])
@@ -452,3 +455,20 @@ for (page in 1:num_pages) {
 # Reset the plotting parameters
 par(mfrow = c(1, 1))
 
+################################################################################
+# Bar plot of response variable
+################################################################################
+# Calculate proportions
+response_prop = prop.table(table(response))
+barplot(response_prop,
+        main = "Proportion of Match Classes",
+        xlab = "Match",
+        col = c("tomato","skyblue"),
+        legend.text = c(
+          paste0("0 (no match): ", 
+                 sprintf("%.1f%%", response_prop[1] * 100)),
+          paste0("1 (match): ", 
+                 sprintf("%.1f%%", response_prop[2] * 100))
+        ))
+
+# Imbalanced dataset --> stratified sampling

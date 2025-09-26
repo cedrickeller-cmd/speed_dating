@@ -22,6 +22,38 @@ names(data)
 head(data)
 
 ################################################################################
+# Proportion of missing values by predictor across match classes
+################################################################################
+# Proportion of missing values by predictor across match classes
+miss_dist = t(sapply(data[ , !(names(data) %in% "match")], function(x) {
+  miss = is.na(x)
+  if (!any(miss)) {
+    rep(0, nlevels(data$match))
+  } else {
+    prop.table(table(data$match[miss]))
+  }
+}))
+
+# Add match class names as column names
+colnames(miss_dist) = levels(data$match)
+#miss_dist
+
+##############################
+# Transpose for barplot so that each predictor is a bar
+barplot(t(miss_dist),
+        beside = FALSE, # stacked bars
+        legend.text = c("0 (no match)", "1 (match)"), #colnames(miss_dist),
+        args.legend = list(x = "center"),
+        names.arg = rep("", nrow(miss_dist)), # blank labels for each bar; otherwise: las = 2, # rotate x-axis labels
+        main = "Prop of Missing Values by Predictor and Class",
+        xlab= "Predictors",
+        ylab = "Proportion of Missing Values",
+        col = c("skyblue", "salmon")
+)
+
+# No predictors stand out to have significantly more missing values by match class than others
+
+################################################################################
 # Dropping columns not used in prediction, storing response variable separately
 ################################################################################
 
@@ -72,6 +104,7 @@ length(cols_bin)-1 ############################## #  d_d_age is duplicated someh
 cols_no_bin
 cols_bin
 
+##############################
 # keep only non-bin data
 data_no_bin = data[, cols_no_bin]
 
@@ -121,7 +154,7 @@ names(cont_data)
 names(cat_data)
 
 ################################################################################
-# Creating dummy variables for Categorical data
+# Creating dummy variables for categorical data
 ################################################################################
 dummies = dummyVars(~ ., data = cat_data, fullRank=TRUE)
 
@@ -131,7 +164,7 @@ dim(cat_dummies)
 names(cat_dummies)
 
 ################################################################################
-# Applying correlations on Continuous Data
+# Applying correlations on continuous data
 ################################################################################
 
 correlations_cont = cor(cont_data)
@@ -144,14 +177,15 @@ findCorrelation(correlations_cont, cutoff = 0.85)
 # columns not dropped because we will let PCA handle it
 
 ################################################################################
-# Applying NZV on Categorical Data
+# Applying NZV on categorical data
 ################################################################################
+# Find NZV predictors
+nzv_cat = nearZeroVar(cat_dummies)
+colnames(cat_dummies)[nzv_cat] # "fieldEcology" "fieldOther"
 
-nearZeroVar(cat_dummies)
-# colnames(cat_dummies)[c(12,16)] # "fieldEcology" "fieldOther" 
-
-# columns not dropped because we will let PCA handle it
-
+# Drop NZV columns
+cat_dummies_nzv = cat_dummies[, -nzv_cat]
+dim(cat_dummies_nzv)
 
 ################################################################################
 # Histograms of continuous predictors
@@ -190,11 +224,10 @@ for (page in 1:num_pages) {
 # Reset the plotting parameters
 par(mfrow = c(1, 1))
 
-
 ################################################################################
-# Transformation -- Box Cox
+# Transformation -- Box-Cox
 ################################################################################
-
+##############################
 # Get all BoxCox lambda values for predictors
 lambdas = sapply(cont_data, function(x) { 
   BoxCoxTrans(x + 0.000001)$lambda # requires "caret" package; tiny value must be added to only have positive numbers (for the Box Cox Transformation to converge)
@@ -209,7 +242,8 @@ cont_skewed = names(skew_values[abs(skew_values) > 1])
 # Drop NA
 cont_skewed = lambdas[names(lambdas) != "Na"]
 
-# Box-Cox Transformed continuous list (initialization)
+##############################
+# Box-Cox transformed continuous list (initialization)
 cont_data_bc = cont_data
 
 # Loop through variables for transformation
@@ -262,22 +296,160 @@ for (page in 1:num_pages) {
 par(mfrow = c(1, 1))
 
 ################################################################################
+# PCA (incl. center + scale) -- only on continuous data
+################################################################################
+pcaObject = prcomp(cont_data_bc, center = TRUE, scale. = TRUE)
+
+# Cumulative percentage of variance which each component accounts for
+percentVariance = pcaObject$sd^2/sum(pcaObject$sd^2)*100
+percentVariance[1:5]
+
+cumpercentVariance = cumsum(pcaObject$sd^2)/sum(pcaObject$sd^2)*100
+cumpercentVariance[1:20]
+
+# Transformed values are stored in pcaObject as a sub-object called x:
+head(pcaObject$x[, 1:5])
+
+##############################
+# Cutoff values
+cutoffs = c(65, 80, 90, 95) # total variance explained
+
+# Scree plot
+plot(percentVariance, type = "o",
+     xlab = "Principal Component",
+     ylab = "Percent of Total Variance Explained (%)",
+     main = "Scree Plot")
+# Add lines and labels
+for (c in cutoffs) {
+  # Find the first PC that reaches the cutoff
+  k = which(cumpercentVariance >= c)[1]
+  
+  # Vertical line at k
+  abline(v = k, col = "darkblue", lty = 2)
+  # Text label
+  text(x = k+2.65, y = percentVariance[k]+.6, labels = paste0(c, " %"), col = "darkred", cex = 0.8)
+  text(x = k+3.5, y = percentVariance[k]+.25, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
+}
+
+##############################
+# Cumulative variance plot
+plot(cumpercentVariance, type = "o",
+     xlab = "# of Principal Components",
+     ylab = "Percent of Total Variance Explained (%)",
+     main = "Cumulative Variance Explained by PCs")
+# Add lines and labels
+for (c in cutoffs) {
+  # Find the first PC that reaches the cutoff
+  k = which(cumpercentVariance >= c)[1]
+  
+  # Add horizontal line
+  abline(h = c, col = "darkred", lty = 2)
+  # Vertical line at k
+  abline(v = k, col = "darkblue", lty = 2)
+  # Text label
+  text(x = 1, y = c+2, labels = paste0(c, " %"), col = "darkred", cex = 0.8)
+  text(x = k+3.5, y = c-2, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
+}
+
+##############################
+# We cannot make a significant reduction of predictors with high enough variance explained
+
+################################################################################
+# Boxplots of Box-Cox transformed continuous data
+################################################################################
+
+# Calculate the number of plot pages needed
+num_cols = length(names(cont_data_bc))
+num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
+
+# Loop through pages
+for (page in 1:num_pages) {
+  # Set up 3x3 plotting area
+  par(mfrow = c(3, 3), 
+      mar = c(4, 4, 2, 1),   # Adjust margins to give some space
+      oma = c(0, 0, 2, 0))   # Outer margin for overall title
+  
+  # Calculate start and end columns for this page
+  start_col = (page - 1) * 9 + 1
+  end_col = min(start_col + 8, num_cols)
+  
+  # Create boxplots for columns on this page
+  for (i in start_col:end_col) {
+    col = names(cont_data_bc)[i]
+    boxplot(cont_data_bc[[col]], 
+         main = col, 
+         xlab = "Value",
+         col = "skyblue", 
+         border = "black")
+  }
+  
+  # Add an overall title for the page
+  mtext(paste0("Boxplots Box-Cox transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
+}
+
+# Reset the plotting parameters
+par(mfrow = c(1, 1))
+
+
+################################################################################
 # Spatial Sign transformation
 ################################################################################
+# Spacial sign transform the continuous data (box-cox transformed)
+ss_trans = preProcess(cont_data_bc, method = c("spatialSign")) # requires "caret" package
+ss_trans
+
+# Apply transformation
+cont_data_ss = predict(ss_trans, cont_data_bc)  # all (59) centered, scaled, and spatial sign transformed
+dim(cont_data_bc)
+dim(cont_data_ss)
+
+# Check different values
+head(cont_data[1:3, 1:5])
+head(cont_data_bc[1:3, 1:5])
+head(cont_data_ss[1:3, 1:5])
+min(cont_data_ss); max(cont_data_ss) # health check: all between -1 and 1
 
 ################################################################################
 # Box-Plot of spatial sign transformed data
 ################################################################################
+# Calculate the number of plot pages needed
+num_cols = length(names(cont_data_ss))
+num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
 
+# Loop through pages
+for (page in 1:num_pages) {
+  # Set up 3x3 plotting area
+  par(mfrow = c(3, 3), 
+      mar = c(4, 4, 2, 1),   # Adjust margins to give some space
+      oma = c(0, 0, 2, 0))   # Outer margin for overall title
+  
+  # Calculate start and end columns for this page
+  start_col = (page - 1) * 9 + 1
+  end_col = min(start_col + 8, num_cols)
+  
+  # Create boxplots for columns on this page
+  for (i in start_col:end_col) {
+    col = names(cont_data_ss)[i]
+    boxplot(cont_data_ss[[col]], 
+            main = col, 
+            xlab = "Value",
+            col = "skyblue", 
+            border = "black")
+  }
+  
+  # Add an overall title for the page
+  mtext(paste0("Boxplots Spatial Sign transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
+}
+
+# Reset the plotting parameters
+par(mfrow = c(1, 1))
 
 ################################################################################
-# PCA (incl. center + scale)
+# Merging continuous and categorical data
 ################################################################################
-
-# Merge continuous + categorical (dummy var)
-
-
-
-
-
-
+# Merge continuous + categorical (dummy vars after nzv)
+dim(cont_data_ss) # 8378 rows
+dim(cat_dummies_nzv) # 8378 rows
+combined_data = cbind(cont_data_bc, cat_dummies_nzv)
+dim(combined_data)
+names(combined_data)

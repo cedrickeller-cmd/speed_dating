@@ -22,41 +22,8 @@ names(data)
 head(data)
 
 ################################################################################
-# Proportion of missing values by predictor across match classes
-################################################################################
-# Proportion of missing values by predictor across match classes
-miss_dist = t(sapply(data[ , !(names(data) %in% "match")], function(x) {
-  miss = is.na(x)
-  if (!any(miss)) {
-    rep(0, nlevels(data$match))
-  } else {
-    prop.table(table(data$match[miss]))
-  }
-}))
-
-# Add match class names as column names
-colnames(miss_dist) = levels(data$match)
-#miss_dist
-
-##############################
-# Transpose for barplot so that each predictor is a bar
-barplot(t(miss_dist),
-        beside = FALSE, # stacked bars
-        legend.text = c("0 (no match)", "1 (match)"), #colnames(miss_dist),
-        args.legend = list(x = "center"),
-        names.arg = rep("", nrow(miss_dist)), # blank labels for each bar; otherwise: las = 2, # rotate x-axis labels
-        main = "Prop of Missing Values by Predictor and Class",
-        xlab= "Predictors",
-        ylab = "Proportion of Missing Values",
-        col = c("skyblue", "salmon")
-)
-
-# No predictors stand out to have significantly more missing values by match class than others
-
-################################################################################
 # Dropping columns not used in prediction, storing response variable separately
 ################################################################################
-
 ##############################
 # response variable
 response = data[, length(data)]
@@ -112,7 +79,7 @@ dim(data_no_bin)
 head(data_no_bin)
 
 ################################################################################
-# Clean $field   # need to address NA values (add to other?)
+# Clean $field
 ################################################################################
 # exploration 
 length(unique(data_no_bin$field))
@@ -131,12 +98,40 @@ data_no_bin$field = case_when(
   grepl("political|international|public policy|public administration|SIPA|international affairs|Intrernational", data_no_bin$field, ignore.case = TRUE) ~ "Politics/International Affairs",
   grepl("Acting|MFA|Nonfiction|Writing|Theatre Management|Speech|journalism|communications|GSAS", data_no_bin$field, ignore.case = TRUE) ~ "Arts/Humanities",
   grepl("theory|Undergrad - GS|working", data_no_bin$field, ignore.case = TRUE) ~ "Other",
-  TRUE ~ data_no_bin$field  # OR USE "Other" -- currently shows NA
+  TRUE ~ data_no_bin$field  # keeping NA
 )
 
 length(table(data_no_bin$field, useNA = "ifany"))
 #table(data_no_bin$field, useNA = "ifany")
 
+################################################################################
+# Proportion of missing data in each column
+################################################################################
+##############################
+# Proportion of observations with at least one missing value
+num_missing_obs = sum(!complete.cases(data_no_bin))
+num_missing_obs
+prop_missing_obs = num_missing_obs / nrow(data_no_bin)
+prop_missing_obs # 87.5%
+
+##############################
+# Proportion of missing values per column
+missing_proportions = colSums(is.na(data_no_bin)) / nrow(data_no_bin)
+
+sort(missing_proportions, decreasing = TRUE)
+
+##############################
+# Drop predictors with missing values > 50%
+data_no_bin = data_no_bin[, missing_proportions <= 0.75]
+
+dim(data_no_bin)
+
+##############################
+# Proportion of observations with at least one missing value (after drop)
+num_missing_obs = sum(!complete.cases(data_no_bin))
+num_missing_obs
+prop_missing_obs = num_missing_obs / nrow(data_no_bin)
+prop_missing_obs # 42.0%
 
 ################################################################################
 # KNN Imputation   # may consider interpolation instead   # do splitting before to avoid data leakage
@@ -183,9 +178,7 @@ findCorrelation(correlations_cont, cutoff = 0.85)
 nzv_cat = nearZeroVar(cat_dummies)
 colnames(cat_dummies)[nzv_cat] # "fieldEcology" "fieldOther"
 
-# Drop NZV columns
-cat_dummies_nzv = cat_dummies[, -nzv_cat]
-dim(cat_dummies_nzv)
+# columns not dropped because we will let PCA handle it
 
 ################################################################################
 # Histograms of continuous predictors
@@ -258,9 +251,9 @@ for (col in names(cont_skewed)) {
   cont_data_bc[[col]] = x_trans
 }
 
-################################################################################
+##############################
 # Histograms of box-cox transformed data
-################################################################################
+
 #length(cont_data) # 59
 
 # Calculate the number of plot pages needed
@@ -296,9 +289,19 @@ for (page in 1:num_pages) {
 par(mfrow = c(1, 1))
 
 ################################################################################
+# Merging continuous and categorical data
+################################################################################
+# Merge continuous + categorical (dummy vars after nzv)
+dim(cont_data_ss) # 8378 rows
+dim(cat_dummies) # 8378 rows
+combined_data = cbind(cont_data_bc, cat_dummies)
+dim(combined_data)
+names(combined_data)
+
+################################################################################
 # PCA (incl. center + scale) -- only on continuous data
 ################################################################################
-pcaObject = prcomp(cont_data_bc, center = TRUE, scale. = TRUE)
+pcaObject = prcomp(combined_data, center = TRUE, scale. = TRUE)
 
 # Cumulative percentage of variance which each component accounts for
 percentVariance = pcaObject$sd^2/sum(pcaObject$sd^2)*100
@@ -348,18 +351,24 @@ for (c in cutoffs) {
   abline(v = k, col = "darkblue", lty = 2)
   # Text label
   text(x = 1, y = c+2, labels = paste0(c, " %"), col = "darkred", cex = 0.8)
-  text(x = k+3.5, y = c-2, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
+  text(x = k+4.5, y = c-2, labels = paste0(k, " PCs"), col = "darkblue", cex = 0.8)
 }
 
 ##############################
-# We cannot make a significant reduction of predictors with high enough variance explained
+# The reduction of predictors with high enough variance explained is limited
+# Before PCA: 76, After PCA: 95%->61 PCs, 90%->52PCs
+
+c = 90 # cutoff percentage
+k = which(cumpercentVariance >= c)[1] # first k PC exceeding the cum pct var explained
+
+data_pca = as.data.frame(pcaObject$x[, 1:k])
 
 ################################################################################
-# Boxplots of Box-Cox transformed continuous data
+# Boxplots of Box-Cox of k PCs
 ################################################################################
 
 # Calculate the number of plot pages needed
-num_cols = length(names(cont_data_bc))
+num_cols = length(names(data_pca))
 num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
 
 # Loop through pages
@@ -375,8 +384,8 @@ for (page in 1:num_pages) {
   
   # Create boxplots for columns on this page
   for (i in start_col:end_col) {
-    col = names(cont_data_bc)[i]
-    boxplot(cont_data_bc[[col]], 
+    col = names(data_pca)[i]
+    boxplot(data_pca[[col]], 
          main = col, 
          xlab = "Value",
          col = "skyblue", 
@@ -384,7 +393,7 @@ for (page in 1:num_pages) {
   }
   
   # Add an overall title for the page
-  mtext(paste0("Boxplots Box-Cox transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
+  mtext(paste0("Boxplots PCA transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
 }
 
 # Reset the plotting parameters
@@ -394,26 +403,25 @@ par(mfrow = c(1, 1))
 ################################################################################
 # Spatial Sign transformation
 ################################################################################
-# Spacial sign transform the continuous data (box-cox transformed)
-ss_trans = preProcess(cont_data_bc, method = c("spatialSign")) # requires "caret" package
+# Spacial sign transform the PCs
+ss_trans = preProcess(data_pca, method = c("spatialSign")) # requires "caret" package
 ss_trans
 
 # Apply transformation
-cont_data_ss = predict(ss_trans, cont_data_bc)  # all (59) centered, scaled, and spatial sign transformed
-dim(cont_data_bc)
-dim(cont_data_ss)
+data_pca_ss = predict(ss_trans, data_pca)  # all (k) centered, scaled, and spatial sign transformed
+dim(data_pca)
+dim(data_pca_ss)
 
 # Check different values
-head(cont_data[1:3, 1:5])
-head(cont_data_bc[1:3, 1:5])
-head(cont_data_ss[1:3, 1:5])
-min(cont_data_ss); max(cont_data_ss) # health check: all between -1 and 1
+head(data_pca[1:3, 1:5])
+head(data_pca_ss[1:3, 1:5])
+min(data_pca_ss); max(data_pca_ss) # health check: all between -1 and 1
 
 ################################################################################
 # Box-Plot of spatial sign transformed data
 ################################################################################
 # Calculate the number of plot pages needed
-num_cols = length(names(cont_data_ss))
+num_cols = length(names(data_pca_ss))
 num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
 
 # Loop through pages
@@ -429,8 +437,8 @@ for (page in 1:num_pages) {
   
   # Create boxplots for columns on this page
   for (i in start_col:end_col) {
-    col = names(cont_data_ss)[i]
-    boxplot(cont_data_ss[[col]], 
+    col = names(data_pca_ss)[i]
+    boxplot(data_pca_ss[[col]], 
             main = col, 
             xlab = "Value",
             col = "skyblue", 
@@ -444,12 +452,3 @@ for (page in 1:num_pages) {
 # Reset the plotting parameters
 par(mfrow = c(1, 1))
 
-################################################################################
-# Merging continuous and categorical data
-################################################################################
-# Merge continuous + categorical (dummy vars after nzv)
-dim(cont_data_ss) # 8378 rows
-dim(cat_dummies_nzv) # 8378 rows
-combined_data = cbind(cont_data_bc, cat_dummies_nzv)
-dim(combined_data)
-names(combined_data)

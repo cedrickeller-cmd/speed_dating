@@ -214,15 +214,15 @@ par(mfrow = c(1, 1))
 ################################################################################
 ##############################
 # Get all Box-Cox lambda values for predictors
-lambdas = sapply(cont_data, function(x) {
+lambdas_all = sapply(cont_data, function(x) {
   minx  = min(x, na.rm = TRUE) # should not have NA values
   shift = ifelse(minx <= 0, abs(minx) + 1, 0)
   BoxCoxTrans(x + shift)$lambda # requires "caret" package; value must be added to only have positive numbers (for the Box Cox Transformation to converge)
 })
-#lambdas
+lambdas_all[1:5]
 
 skew_values = apply(cont_data, 2, skewness)
-#skew_values
+skew_values[1:5]
 
 # Only retain highly skewed predictors
 cont_skewed = names(skew_values[abs(skew_values) > 1])
@@ -232,21 +232,35 @@ cont_skewed
 # Box-Cox transformed continuous list (initialization)
 cont_data_bc = cont_data
 
+# Vector to store lambda values
+lambdas_skew = numeric(length(cont_skewed))
+names(lambdas_skew) = cont_skewed
+
 # Loop through variables for transformation
 for (col in cont_skewed) {
-  x = cont_data[[col]]
+  x = cont_data_bc[[col]]
   
   # Offset to only have positive numbers (for the Box Cox Transformation to converge)
   minx  = min(x, na.rm = TRUE) # should not have NA values
   shift = ifelse(minx <= 0, abs(minx) + 1, 0)
-
+  
   # Box-Cox transform
   bct = BoxCoxTrans(x + shift)
   x_trans = predict(bct, x + shift)
   
+  # Save lambda
+  lambdas_skew[col] = bct$lambda
+  
   # Replace original values with transformed values
   cont_data_bc[[col]] = x_trans
 }
+lambdas_skew
+
+# Double checking which predictors were transformed
+changed_pred = names(cont_data)[sapply(names(cont_data), function(col) {
+  !all.equal(cont_data[[col]], cont_data_bc[[col]], check.attributes = FALSE) == TRUE
+})]
+changed_pred
 
 ##############################
 # Histograms of box-cox transformed data
@@ -312,7 +326,11 @@ dim(combined_data_bc)
 correlations = cor(combined_data)
 dim(correlations)
 #correlations[1:4, 1:4]
-corrplot(correlations, order = "hclust", title = "Correlation Matrix of Predictors\nBefore Box-Cox Transformation on Continuous Data", mar = c(0, 0, 2, 0))
+corrplot(correlations,
+          order = "hclust",
+          title = "Correlation Matrix of Continuous Predictors\nNon-Transformed",
+          tl.pos = "n",
+          mar = c(0, 0, 2, 0))
 corr_pred = findCorrelation(correlations, cutoff = 0.85)
 #colnames(combined_data)[corr_pred] # "museums"
 
@@ -321,7 +339,12 @@ corr_pred = findCorrelation(correlations, cutoff = 0.85)
 correlations_bc = cor(combined_data_bc)
 dim(correlations_bc)
 #correlations_bc[1:4, 1:4]
-corrplot(correlations_bc, order = "hclust", title = "Correlation Matrix of Predictors\nAfter Box-Cox Transformation on Continuous Data", mar = c(0, 0, 2, 0))
+corrplot(correlations_bc,
+         order = "hclust",
+         title = "Correlation Matrix of Continuous Predictors\nAfter Box-Cox Transformation",
+         tl.pos = "n",
+         mar = c(0, 0, 2, 0))
+
 corr_pred_bc = findCorrelation(correlations_bc, cutoff = 0.85)
 #colnames(combined_data_bc)[corr_pred] # "museums"
 

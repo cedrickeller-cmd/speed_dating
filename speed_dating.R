@@ -163,26 +163,14 @@ dim(cat_dummies)
 names(cat_dummies)
 
 ################################################################################
-# Applying correlations on continuous data
-################################################################################
-
-correlations_cont = cor(cont_data)
-dim(correlations_cont)
-#correlations_cont[1:4, 1:4]
-?corrplot(correlations_cont, order = "hclust", title = "Correlation Matrix of Continuous Predictors", mar = c(0, 0, 2, 0))
-findCorrelation(correlations_cont, cutoff = 0.85)
-#colnames(cont_data)[c(40)] # "museums"
-
-# columns not dropped because we will let PCA handle it
-
-################################################################################
 # Applying NZV on categorical data
 ################################################################################
 # Find NZV predictors
 nzv_cat = nearZeroVar(cat_dummies)
 colnames(cat_dummies)[nzv_cat] # "fieldEcology" "fieldOther"
 
-# columns not dropped because we will let PCA handle it
+cat_var = cat_dummies[, -nzv_cat]
+dim(cat_var)
 
 ################################################################################
 # Histograms of continuous predictors
@@ -225,30 +213,36 @@ par(mfrow = c(1, 1))
 # Transformation -- Box-Cox
 ################################################################################
 ##############################
-# Get all BoxCox lambda values for predictors
-lambdas = sapply(cont_data, function(x) { 
-  BoxCoxTrans(x + 1)$lambda # requires "caret" package; value must be added to only have positive numbers (for the Box Cox Transformation to converge)
+# Get all Box-Cox lambda values for predictors
+lambdas = sapply(cont_data, function(x) {
+  minx  = min(x, na.rm = TRUE) # should not have NA values
+  shift = ifelse(minx <= 0, abs(minx) + 1, 0)
+  BoxCoxTrans(x + shift)$lambda # requires "caret" package; value must be added to only have positive numbers (for the Box Cox Transformation to converge)
 })
 #lambdas
 
 skew_values = apply(cont_data, 2, skewness)
-#skewValues
+#skew_values
 
 # Only retain highly skewed predictors
 cont_skewed = names(skew_values[abs(skew_values) > 1])
-#cont_skewed
+cont_skewed
 
 ##############################
 # Box-Cox transformed continuous list (initialization)
 cont_data_bc = cont_data
 
 # Loop through variables for transformation
-for (col in names(cont_skewed)) {
+for (col in cont_skewed) {
   x = cont_data[[col]]
   
+  # Offset to only have positive numbers (for the Box Cox Transformation to converge)
+  minx  = min(x, na.rm = TRUE) # should not have NA values
+  shift = ifelse(minx <= 0, abs(minx) + 1, 0)
+
   # Box-Cox transform
-  bct = BoxCoxTrans(x + 0.000001)  # tiny offset to only have positive numbers (for the Box Cox Transformation to converge)
-  x_trans = predict(bct, x + 0.000001)
+  bct = BoxCoxTrans(x + shift)
+  x_trans = predict(bct, x + shift)
   
   # Replace original values with transformed values
   cont_data_bc[[col]] = x_trans
@@ -294,17 +288,53 @@ par(mfrow = c(1, 1))
 ################################################################################
 # Merging continuous and categorical data
 ################################################################################
+##############################
 # Merge continuous + categorical (dummy vars after nzv)
-dim(cont_data_bc) # 8378 rows
-dim(cat_dummies) # 8378 rows
-combined_data = cbind(cont_data_bc, cat_dummies)
+dim(cont_data) # 8378 rows
+dim(cat_var) # 8378 rows
+combined_data = cbind(cont_data, cat_var)
 dim(combined_data)
-names(combined_data)
+#names(combined_data)
+
+##############################
+# Merge continuous (after box-cox) + categorical (dummy vars after nzv)
+dim(cont_data_bc) # 8378 rows
+dim(cat_var) # 8378 rows
+combined_data_bc = cbind(cont_data_bc, cat_var)
+dim(combined_data_bc)
+#names(combined_data_bc)
 
 ################################################################################
-# PCA (incl. center + scale) -- only on continuous data
+# Applying correlations on all data
 ################################################################################
-pcaObject = prcomp(combined_data, center = TRUE, scale. = TRUE)
+##############################
+# before box-cox
+correlations = cor(combined_data)
+dim(correlations)
+#correlations[1:4, 1:4]
+corrplot(correlations, order = "hclust", title = "Correlation Matrix of Predictors\nBefore Box-Cox Transformation on Continuous Data", mar = c(0, 0, 2, 0))
+corr_pred = findCorrelation(correlations, cutoff = 0.85)
+#colnames(combined_data)[corr_pred] # "museums"
+
+##############################
+# after box-cox
+correlations_bc = cor(combined_data_bc)
+dim(correlations_bc)
+#correlations_bc[1:4, 1:4]
+corrplot(correlations_bc, order = "hclust", title = "Correlation Matrix of Predictors\nAfter Box-Cox Transformation on Continuous Data", mar = c(0, 0, 2, 0))
+corr_pred_bc = findCorrelation(correlations_bc, cutoff = 0.85)
+#colnames(combined_data_bc)[corr_pred] # "museums"
+
+##############################
+# drop highly correlated predictor (not to be used for PCA, let it handle it)
+dim(combined_data_bc)
+combined_uncorr = combined_data_bc[, -corr_pred_bc]
+dim(combined_uncorr)
+
+################################################################################
+# PCA (incl. center + scale) -- on all data (not only on continuous data)
+################################################################################
+pcaObject = prcomp(combined_data_bc, center = TRUE, scale. = TRUE)
 
 # Cumulative percentage of variance which each component accounts for
 percentVariance = pcaObject$sd^2/sum(pcaObject$sd^2)*100
@@ -367,11 +397,12 @@ k = which(cumpercentVariance >= c)[1] # first k PC exceeding the cum pct var exp
 data_pca = as.data.frame(pcaObject$x[, 1:k])
 
 ################################################################################
-# Boxplots of Box-Cox of k PCs
+# Boxplots of uncorrelated data
 ################################################################################
+pre_ss = combined_uncorr
 
 # Calculate the number of plot pages needed
-num_cols = length(names(data_pca))
+num_cols = length(names(pre_ss))
 num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
 
 # Loop through pages
@@ -387,8 +418,8 @@ for (page in 1:num_pages) {
   
   # Create boxplots for columns on this page
   for (i in start_col:end_col) {
-    col = names(data_pca)[i]
-    boxplot(data_pca[[col]], 
+    col = names(pre_ss)[i]
+    boxplot(pre_ss[[col]], 
          main = col, 
          xlab = "Value",
          col = "skyblue", 
@@ -396,35 +427,34 @@ for (page in 1:num_pages) {
   }
   
   # Add an overall title for the page
-  mtext(paste0("Boxplots PCA transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
+  mtext(paste0("Boxplots Box-Cox transformed (", page, "/", num_pages, ")"), outer = TRUE, cex = 1.5)
 }
 
 # Reset the plotting parameters
 par(mfrow = c(1, 1))
 
-
 ################################################################################
 # Spatial Sign transformation
 ################################################################################
-# Spacial sign transform the PCs
-ss_trans = preProcess(data_pca, method = c("spatialSign")) # requires "caret" package
+# Spacial sign transform the uncorrelated data
+ss_trans = preProcess(pre_ss, method = c("spatialSign")) # requires "caret" package
 ss_trans
 
 # Apply transformation
-data_pca_ss = predict(ss_trans, data_pca)  # all (k) centered, scaled, and spatial sign transformed
-dim(data_pca)
-dim(data_pca_ss)
+data_post_ss = predict(ss_trans, pre_ss)  # all (k) centered, scaled, and spatial sign transformed
+dim(pre_ss)
+dim(data_post_ss)
 
 # Check different values
-head(data_pca[1:3, 1:5])
-head(data_pca_ss[1:3, 1:5])
-min(data_pca_ss); max(data_pca_ss) # health check: all between -1 and 1
+head(pre_ss[1:3, 1:5])
+head(data_post_ss[1:3, 1:5])
+min(data_post_ss); max(data_post_ss) # health check: all between -1 and 1
 
 ################################################################################
 # Box-Plot of spatial sign transformed data
 ################################################################################
 # Calculate the number of plot pages needed
-num_cols = length(names(data_pca_ss))
+num_cols = length(names(data_post_ss))
 num_pages = ceiling(num_cols / 9)  # 9 plots per page (3x3 grid)
 
 # Loop through pages
@@ -440,8 +470,8 @@ for (page in 1:num_pages) {
   
   # Create boxplots for columns on this page
   for (i in start_col:end_col) {
-    col = names(data_pca_ss)[i]
-    boxplot(data_pca_ss[[col]], 
+    col = names(data_post_ss)[i]
+    boxplot(data_post_ss[[col]], 
             main = col, 
             xlab = "Value",
             col = "skyblue", 
@@ -472,3 +502,36 @@ barplot(response_prop,
         ))
 
 # Imbalanced dataset --> stratified sampling
+
+################################################################################
+# Example predictor of transformations
+################################################################################
+col = "age"
+
+par(mfrow = c(1, 2), mar = c(4, 4, 4, 2))
+
+hist(cont_data[[col]], 
+     main = paste("Histogram of", col), 
+     xlab = "Value",
+     col = "skyblue", 
+     border = "black")
+
+hist(cont_data_bc[[col]], 
+     main = paste("Histogram of", col, "\n(Box-Cox transformed)"),
+     xlab = "Value",
+     col = "skyblue", 
+     border = "black")
+
+boxplot(pre_ss[[col]], 
+        main = paste("Boxplot of", col, "\n(Box-Cox transformed)"),
+        xlab = "Value",
+        col = "skyblue", 
+        border = "black")
+
+boxplot(data_post_ss[[col]], 
+        main = paste("Boxplot of", col, "\n(Spatial Sign transformed)"),
+        xlab = "Value",
+        col = "skyblue", 
+        border = "black")
+
+par(mfrow = c(1, 1))
